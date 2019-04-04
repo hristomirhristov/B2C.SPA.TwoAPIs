@@ -1,0 +1,250 @@
+<html>
+<head>
+    <title>Calling a Web API as a user authenticated with Msal.js app</title>
+    <style>
+        .hidden {
+            visibility: hidden
+        }
+
+        .visible {
+            visibility: visible
+        }
+
+        .response {
+            border: solid;
+            border-width: thin;
+            background-color: azure;
+            padding: 2px;
+            font-size: 20px;
+        }
+
+        .greeting {
+            font-size: 30px;
+            color: blue;
+        }
+
+        .button {
+            display: inline-block;
+            font-size: 25px;
+        }
+    </style>
+</head>
+<body>
+    <!-- bluebird only needed if this page needs to run on Internet Explorer -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/bluebird/3.3.4/bluebird.min.js" class="pre"></script>
+    <script src="https://secure.aadcdn.microsoftonline-p.com/lib/0.1.1/js/msal.min.js"></script>
+    <script src="https://code.jquery.com/jquery-3.2.1.min.js" class="pre"></script>
+
+    <h1>Getting an access token with Azure AD B2C and calling a Web API</h1>
+    <div>
+        <div id="label" class="greeting">Sign-in with Microsoft Azure AD B2C</div>
+        <br/><br/>
+        <button id="auth" onclick="login()" class="button">Login</button>
+        <button id="callApiButtonDotNet" class="hidden button" onclick="callApiDotNet()">Call .NET Web API</button>
+        <button id="callApiButtonNodeJs" class="hidden button" onclick="callApiNodeJS()">Call NodeJS Web API</button>
+		<button id="callApiButtonDotNetCore" class="hidden button" onclick="callApiDotNetCore()">Call .NET Core Web API</button>
+    </div>
+
+    <pre class="response"></pre>
+
+    <script class="pre">
+        // The current application coordinates were pre-registered in a B2C tenant.
+        var applicationConfig = {
+            clientID: 'your_webapp_b2c_app_id',
+            authority: "https://login.microsoftonline.com/tfp/your_b2c_ad.onmicrosoft.com/your_b2c_sign_in_policy",
+
+            b2cScopes: ["https://your_b2c_ad.onmicrosoft.com/dotnet_app_id_uri/read"],
+            webApi: 'https://localhost:44332/api/',
+
+            b2cScopesNodeJS: ["https://your_b2c_ad.onmicrosoft.com/nodejs_app_id_uri/demo.read"],
+            webApiNodeJS: 'http://localhost:5000/hello',
+			
+			b2cScopesCore: ["https://your_b2c_ad.onmicrosoft.com/dotnetcore_app_id_uri/read"],
+            webApiCore: 'http://localhost:50422/coreapi/',
+        };
+    </script>
+
+    <script>
+        "use strict";
+        var clientApplication = new Msal.UserAgentApplication(applicationConfig.clientID, applicationConfig.authority, function (errorDesc, token, error, tokenType) {
+            // Called after loginRedirect or acquireTokenPopup
+        });
+
+        function login() {
+            if (clientApplication.getUser() == null) {
+                clientApplication.loginRedirect(applicationConfig.b2cScopes).then(function (idToken) {
+                    clientApplication.acquireTokenSilent(applicationConfig.b2cScopes).then(function (accessToken) {
+                        updateUI();
+                    }, function (error) {
+                        clientApplication.acquireTokenPopup(applicationConfig.b2cScopes).then(function (accessToken) {
+                            updateUI();
+                        }, function (error) {
+                            logMessage("Error acquiring the popup:\n" + error);
+                        });
+                    })
+                }, function (error) {
+                    logMessage("Error during login:\n" + error);
+                });
+            }
+        }
+
+        function getUser() {
+            console.log(clientApplication.getUser());
+            if (clientApplication.getUser()) {
+                var userName = clientApplication.getUser().a;
+
+                if (userName != undefined) {
+                    logMessage("User '" + userName + "' logged-in");
+					logMessage(" ");
+                }
+
+                var label = document.getElementById('label');
+                label.innerText = label.innerText + ". Hello " + userName;
+                console.log(label.innerText);
+
+                updateUI();
+            }
+        }
+
+        function updateUI() {
+            var userName = clientApplication.getUser().name;
+            
+            if (userName != undefined) {
+                printMessage("<b><i>User '" + userName + "' logged-in. Log APIs calls:</i></b>");
+            }
+            var authButton = document.getElementById('auth');
+            authButton.innerHTML = 'Logout';
+            authButton.setAttribute('onclick', 'logout();');
+            var label = document.getElementById('label');
+            label.innerText = "Hello " + userName;
+            var callWebApiButtonDotNet = document.getElementById('callApiButtonDotNet');
+            callWebApiButtonDotNet.setAttribute('class', 'visible button');
+            var callWebApiButtonNodeJS = document.getElementById('callApiButtonNodeJs');
+            callWebApiButtonNodeJS.setAttribute('class', 'visible button');
+			var callWebApiButtonDotNetCore = document.getElementById('callApiButtonDotNetCore');
+            callWebApiButtonDotNetCore.setAttribute('class', 'hidden button');
+        }
+
+        function callApiDotNet() {
+            clientApplication.acquireTokenSilent(applicationConfig.b2cScopes).then(function (accessToken) {
+                callApiWithAccessTokenDotNet(accessToken);
+            }, function (error) {
+                clientApplication.acquireTokenPopup(applicationConfig.b2cScopes).then(function (accessToken) {
+                    callApiWithAccessTokenDotNet(accessToken);
+                }, function (error) {
+                    logMessage("Error acquiring the access token to call the .NET Web api:\n" + error);
+                });
+            })
+        }
+
+        function callApiWithAccessTokenDotNet(accessToken) {            
+            console.log("callApiWithAccessTokenDotNet");
+            console.log(accessToken);
+            $.ajax({
+                type: "GET",
+                origin: "*",            
+                crossdomain: 'true',
+                contentType: 'text/plain',
+                url: applicationConfig.webApi + "tasks",  
+                headers: {
+                    'Authorization': 'Bearer ' + accessToken,
+                },
+            }).done(function (data) {
+                printMessage("<b>.NET Web APi returned:</b>");
+                if(data && data.length){   
+                    data.forEach(function (task) {
+														printMessage("Id:" + task.Id + ", Owner:" + task.Owner + ", Task:" + task.Text);
+                                                        }); 
+                } else {
+                    printMessage("[]");
+                }
+            })
+                .fail(function (jqXHR) {
+                    logMessage("Error calling the .NET Web api:\n" + "my error.");
+                })
+        }
+
+        function callApiNodeJS() {
+            clientApplication.acquireTokenSilent(applicationConfig.b2cScopesNodeJS).then(function (accessToken) {
+                callApiWithAccessTokenNodeJS(accessToken);
+            }, function (error) {
+                clientApplication.acquireTokenPopup(applicationConfig.b2cScopesNodeJS).then(function (accessToken) {
+                    callApiWithAccessTokenNodeJS(accessToken);
+                }, function (error) {
+                    logMessage("Error acquiring the access token to call the NodeJS Web api:\n" + error);
+                });
+            })
+        }
+
+        function callApiWithAccessTokenNodeJS(accessToken) {
+			console.log("callApiWithAccessTokenNodeJS");
+            console.log(accessToken);
+            $.ajax({
+                type: "GET",
+                url: applicationConfig.webApiNodeJS,
+                headers: {
+                    'Authorization': 'Bearer ' + accessToken,
+                },
+            }).done(function (data) {
+                printMessage("<b>NodeJS Web APi returned:</b>\n\n" + JSON.stringify(data));
+            })
+                .fail(function (jqXHR, textStatus) {
+                    logMessage("Error calling the NodeJS Web api:\n" + textStatus);
+                })
+        }
+		
+		function callApiDotNetCore() {
+            clientApplication.acquireTokenSilent(applicationConfig.b2cScopesCore).then(function (accessToken) {
+                callApiWithAccessTokenDotNetCore(accessToken);
+            }, function (error) {
+                clientApplication.acquireTokenPopup(applicationConfig.b2cScopesCore).then(function (accessToken) {
+                    callApiWithAccessTokenDotNetCore(accessToken);
+                }, function (error) {
+                    logMessage("Error acquiring the access token to call the .NET Core Web api:\n" + error);
+                });
+            })
+        }
+
+        function callApiWithAccessTokenDotNetCore(accessToken) {            
+            console.log("callApiWithAccessTokenDotNetCore");
+            console.log(accessToken);
+			console.log(applicationConfig.webApiCore);
+            $.ajax({
+                type: "GET",
+                origin: "*",            
+                crossdomain: 'true',
+                contentType: 'text/plain',
+                url: applicationConfig.webApiCore + "values",  
+                headers: {
+                    'Authorization': 'Bearer ' + accessToken,
+                },
+            }).done(function (data) {
+                printMessage("<b>.NET Core Web APi returned:</b>\n\n" + JSON.stringify(data));
+            })
+                .fail(function (jqXHR) {
+                    logMessage("Error calling the .NET Core Web api:\n" + "my error.");
+                })
+        }
+
+        function logout() {
+            // Removes all sessions, need to call AAD endpoint to do full logout
+            clientApplication.logout();
+        }
+
+        function logMessage(s) {
+            document.body.querySelector('.response').appendChild(document.createTextNode('\n' + s));
+        }
+		
+		function printMessage(s) {
+			var para = document.createElement("P");
+			para.innerHTML = s;
+            document.body.querySelector('.response').appendChild(para);
+        }
+
+        $(document).ready(function() {
+            getUser();
+        });
+
+    </script>
+</body>
+</html>
